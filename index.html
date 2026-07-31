@@ -168,6 +168,7 @@ input[type=date]::-webkit-calendar-picker-indicator{opacity:.4;cursor:pointer;fi
     <button class="htab" onclick="navTo('trafego')">⟳ Métricas tráfego</button>
     <button class="htab" onclick="navTo('anuncios')">◈ Campanhas / Anúncios</button>
     <button class="htab" onclick="navTo('resumo')">📋 Resumo diário</button>
+    <button class="htab" onclick="navTo('planejamento')">🗓️ Planejamento</button>
   </nav>
   <div class="hdr-right">
     <div class="presets" id="hdr-presets">
@@ -195,6 +196,7 @@ input[type=date]::-webkit-calendar-picker-indicator{opacity:.4;cursor:pointer;fi
   <div id="page-trafego"   class="page"></div>
   <div id="page-anuncios"  class="page"></div>
   <div id="page-resumo"    class="page"></div>
+  <div id="page-planejamento" class="page"></div>
 </div>
 
 <script>
@@ -215,6 +217,11 @@ const METAS_T = {
   connect:  {val:85,    higher:true},
   txConvPg: {val:10,    higher:true},
 };
+
+// ── Planejamento (meta de investimento do mês) ──────────────────────────────
+const PLAN_START = "2026-08-01";
+const PLAN_END   = "2026-08-31";
+const PLAN_TOTAL = 250000;
 
 // Chart colors
 const CHART_COLOR = "#3b82f6";
@@ -702,6 +709,35 @@ function getTotals(daily){
     cpmql:t.mql>0?t.spend/t.mql:0,
     taxaMql:t.trafficLeads>0?(t.mql/t.trafficLeads)*100:0,
   };
+}
+
+// ── Planejamento (leads/MQL) ────────────────────────────────────────────────
+function addDaysISO(iso,n){
+  const[y,m,d]=iso.split("-").map(Number);
+  const dt=new Date(Date.UTC(y,m-1,d));
+  dt.setUTCDate(dt.getUTCDate()+n);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth()+1).padStart(2,"0")}-${String(dt.getUTCDate()).padStart(2,"0")}`;
+}
+function buildPlanDays(){
+  const dates=[];
+  for(let d=PLAN_START;d<=PLAN_END;d=addDaysISO(d,1))dates.push(d);
+  const n=dates.length;
+  const today=todayISO();
+  let prevCum=0;
+  return dates.map((date,i)=>{
+    const cum=Math.round(PLAN_TOTAL*(i+1)/n*100)/100;
+    const investPlanned=Math.round((cum-prevCum)*100)/100;
+    prevCum=cum;
+    const leadsPlanned=Math.round(investPlanned/META_CPL);
+    const mqlPlanned=Math.round(investPlanned/META_CPMQL);
+    const hasData=date<=today;
+    const m=S.meta[date];
+    const l=S.leadsD[date];
+    const investRealized=hasData?(m?.spend||0):null;
+    const leadsRealized=hasData?(l?.traffic||0):null;
+    const mqlRealized=hasData?(S.mqlD[date]||0):null;
+    return{date,investPlanned,leadsPlanned,mqlPlanned,investRealized,leadsRealized,mqlRealized,hasData,isToday:date===today};
+  });
 }
 
 function getDailyT(start,end){
@@ -2497,6 +2533,85 @@ function renderResumoSeg(){
   });
 }
 
+// ── Render Planejamento ─────────────────────────────────────────────────────
+function renderPlanejamento(){
+  const el=document.getElementById("page-planejamento");if(!el)return;
+  const days=buildPlanDays();
+  const done=days.filter(d=>d.hasData);
+  const investPlanTotal=days.reduce((a,d)=>a+d.investPlanned,0);
+  const leadsPlanTotal=days.reduce((a,d)=>a+d.leadsPlanned,0);
+  const mqlPlanTotal=days.reduce((a,d)=>a+d.mqlPlanned,0);
+  const investRealTotal=done.reduce((a,d)=>a+d.investRealized,0);
+  const leadsRealTotal=done.reduce((a,d)=>a+d.leadsRealized,0);
+  const mqlRealTotal=done.reduce((a,d)=>a+d.mqlRealized,0);
+  const investPlanAteHoje=done.reduce((a,d)=>a+d.investPlanned,0);
+  const leadsPlanAteHoje=done.reduce((a,d)=>a+d.leadsPlanned,0);
+  const mqlPlanAteHoje=done.reduce((a,d)=>a+d.mqlPlanned,0);
+  const sc=(val,meta)=>meta>0?statusColor(val,meta,true):"var(--text-strong)";
+  const sb=(val,meta)=>meta>0?statusBorder(val,meta,true):"var(--border)";
+
+  el.innerHTML=`
+    <div class="hdr" style="margin-bottom:6px">
+      <div>
+        <div class="hdr-title">Planejamento</div>
+        <div class="hdr-sub">${days.length} dias · campanha de leads/MQL · período: ${fDateBR(PLAN_START)} a ${fDateBR(PLAN_END)} · atualizado em: ${S.updated||"—"}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px">${statusLegend()}</div>
+    </div>
+    ${S.error?`<div class="err">⚠️ ${S.error}</div>`:""}
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:13px;margin-bottom:13px">
+      ${kpiCard("Investimento planejado",fBRL(investPlanTotal),"total do mês","var(--text-strong)")}
+      ${kpiCard("Investimento realizado",fBRL(investRealTotal),"","var(--text-strong)",false,done.length>0?investRealTotal:null,done.length>0?investPlanAteHoje:null,true)}
+      ${kpiCard("Investimento planejado até hoje",fBRL(investPlanAteHoje),"","var(--text-strong)")}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:13px;margin-bottom:13px">
+      ${kpiCard("Leads planejadas",leadsPlanTotal.toLocaleString("pt-BR"),"total do mês","var(--text-strong)")}
+      ${kpiCard("Leads realizadas",leadsRealTotal.toLocaleString("pt-BR"),"","var(--text-strong)",false,done.length>0?leadsRealTotal:null,done.length>0?leadsPlanAteHoje:null,true)}
+      ${kpiCard("Leads planejadas até hoje",leadsPlanAteHoje.toLocaleString("pt-BR"),"","var(--text-strong)")}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:13px;margin-bottom:20px">
+      ${kpiCard("MQL planejados",mqlPlanTotal.toLocaleString("pt-BR"),"total do mês","#a78bfa")}
+      ${kpiCard("MQL realizados",mqlRealTotal.toLocaleString("pt-BR"),"","#a78bfa",false,done.length>0?mqlRealTotal:null,done.length>0?mqlPlanAteHoje:null,true)}
+      ${kpiCard("MQL planejados até hoje",mqlPlanAteHoje.toLocaleString("pt-BR"),"","#a78bfa")}
+    </div>
+
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:var(--card)">
+          <th style="padding:9px 14px;text-align:left;color:var(--hint);font-size:10px;text-transform:uppercase;letter-spacing:.04em">Data</th>
+          <th style="padding:9px 14px;text-align:right;color:var(--hint);font-size:10px;text-transform:uppercase;letter-spacing:.04em">Investimento planejado</th>
+          <th style="padding:9px 14px;text-align:right;color:var(--hint);font-size:10px;text-transform:uppercase;letter-spacing:.04em">Investimento realizado</th>
+          <th style="padding:9px 14px;text-align:right;color:var(--hint);font-size:10px;text-transform:uppercase;letter-spacing:.04em">Leads planejadas</th>
+          <th style="padding:9px 14px;text-align:right;color:var(--hint);font-size:10px;text-transform:uppercase;letter-spacing:.04em">Leads realizadas</th>
+          <th style="padding:9px 14px;text-align:right;color:var(--hint);font-size:10px;text-transform:uppercase;letter-spacing:.04em">MQL planejados</th>
+          <th style="padding:9px 14px;text-align:right;color:var(--hint);font-size:10px;text-transform:uppercase;letter-spacing:.04em">MQL realizados</th>
+        </tr></thead>
+        <tbody>
+          ${days.map(d=>`
+            <tr style="border-top:1px solid var(--border);${d.isToday?"background:rgba(59,130,246,.08)":""}">
+              <td style="padding:8px 14px;color:var(--text-strong);font-family:'JetBrains Mono',monospace">${fDate(d.date)}${d.isToday?" 👈":""}</td>
+              <td style="padding:8px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:var(--text)">${fBRL(d.investPlanned)}</td>
+              <td style="padding:8px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:${d.hasData?sc(d.investRealized,d.investPlanned):"var(--hint)"}">${d.hasData?fBRL(d.investRealized):"—"}</td>
+              <td style="padding:8px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:var(--text)">${d.leadsPlanned}</td>
+              <td style="padding:8px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:${d.hasData?sc(d.leadsRealized,d.leadsPlanned):"var(--hint)"}">${d.hasData?d.leadsRealized:"—"}</td>
+              <td style="padding:8px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:var(--text)">${d.mqlPlanned}</td>
+              <td style="padding:8px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:${d.hasData?sc(d.mqlRealized,d.mqlPlanned):"var(--hint)"}">${d.hasData?d.mqlRealized:"—"}</td>
+            </tr>`).join("")}
+          <tr style="border-top:2px solid var(--border);font-weight:700">
+            <td style="padding:9px 14px;color:var(--text-strong)">Total</td>
+            <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:var(--text-strong)">${fBRL(investPlanTotal)}</td>
+            <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:${done.length>0?sc(investRealTotal,investPlanAteHoje):"var(--text-strong)"}">${fBRL(investRealTotal)}</td>
+            <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:var(--text-strong)">${leadsPlanTotal}</td>
+            <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:${done.length>0?sc(leadsRealTotal,leadsPlanAteHoje):"var(--text-strong)"}">${leadsRealTotal}</td>
+            <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:var(--text-strong)">${mqlPlanTotal}</td>
+            <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:${done.length>0?sc(mqlRealTotal,mqlPlanAteHoje):"var(--text-strong)"}">${mqlRealTotal}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>`;
+}
+
 // ── Main render ───────────────────────────────────────────────────────────
 function render(){
   renderHeader();
@@ -2526,6 +2641,7 @@ function render(){
     else if(S.currentPage==="trafego") renderTrafego();
     else if(S.currentPage==="anuncios")renderAnuncios();
     else if(S.currentPage==="resumo")  renderResumo();
+    else if(S.currentPage==="planejamento") renderPlanejamento();
   }
 }
 

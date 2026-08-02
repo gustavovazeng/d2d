@@ -474,7 +474,8 @@ async function loadData(force=false){
       const adName=r["Ad Name"]||"";
       const adId=(r["Ad ID"]||r["Ad Id"]||"").trim();
       const igUrl=r["Instagram Permalink URL"]||"";
-      const campName=resolveCampAlias(r["Campaign Name"]||"—");
+      const campNameRaw=r["Campaign Name"]||"—";
+      const campName=resolveCampAlias(campNameRaw);
       const advCode=extractAdvCode(adName)||(adName?adName.toLowerCase():null);
       const temp=extractTemp(campName);
       // Mapas Ad ID → Campaign Name e Ad ID → advCode para cruzar com leads
@@ -503,7 +504,11 @@ async function loadData(force=false){
         if(igUrl&&!mByAdByDate[advCode][d].igUrl)mByAdByDate[advCode][d].igUrl=igUrl;
       }
       if(campName&&campName!=="—"){
-        if(!mByCamp[campName])mByCamp[campName]={campName,spend:0,clicks:0,impressions:0,metaLeads:0,landingViews:0};
+        if(!mByCamp[campName])mByCamp[campName]={campName,dispName:campNameRaw,spend:0,clicks:0,impressions:0,metaLeads:0,landingViews:0};
+        // Nome de exibição: sempre que a linha do Meta vier com um nome "real" diferente do
+        // apelido/canônico (CAMP_ALIAS), mostra o nome real — assim dá pra identificar a
+        // campanha certa no Gerenciador de Anúncios mesmo com a atribuição de leads já corrigida.
+        if(campNameRaw!==campName)mByCamp[campName].dispName=campNameRaw;
         mByCamp[campName].spend+=sp;mByCamp[campName].clicks+=cl;mByCamp[campName].impressions+=im;
         mByCamp[campName].metaLeads+=ml;mByCamp[campName].landingViews+=lv;
         if(!mByCampByDate[campName])mByCampByDate[campName]={};
@@ -1487,7 +1492,8 @@ function renderAnuncios(){
     if(cSpend===0)continue;
     const cLeads=sumPeriod(S.leadsByCamp,campName);
     const cMql=sumPeriod(S.mqlByCamp,campName);
-    campRows.push({campName,spend:cSpend,clicks:cClicks,impressions:cImpr,leads:cLeads,mql:cMql,
+    const dispName=S.metaByCamp[campName]?.dispName||campName;
+    campRows.push({campName,dispName,spend:cSpend,clicks:cClicks,impressions:cImpr,leads:cLeads,mql:cMql,
       cpc:cClicks>0?cSpend/cClicks:0, ctr:cImpr>0?(cClicks/cImpr)*100:0,
       cpm:cImpr>0?(cSpend/cImpr)*1000:0, cpl:cLeads>0?cSpend/cLeads:0,
       cpmql:cMql>0?cSpend/cMql:0});
@@ -1496,7 +1502,7 @@ function renderAnuncios(){
   // Não tem investimento atribuível (não existe no Meta), mas entra na tabela para não sumir dos totais.
   const semUtmCampLeads=sumPeriod(S.leadsByCamp,SEM_UTM);
   if(semUtmCampLeads>0&&(tf==="todas"||extractTemp(SEM_UTM)===tf)){
-    campRows.push({campName:SEM_UTM,spend:0,clicks:0,impressions:0,
+    campRows.push({campName:SEM_UTM,dispName:SEM_UTM,spend:0,clicks:0,impressions:0,
       leads:semUtmCampLeads,mql:sumPeriod(S.mqlByCamp,SEM_UTM),
       cpc:0,ctr:0,cpm:0,cpl:0,cpmql:0});
   }
@@ -1507,7 +1513,7 @@ function renderAnuncios(){
     return cDir==="asc"?av-bv:bv-av;
   });
   const campQ=S.campSearch.trim().toLowerCase();
-  const sortedCamps=campQ?sortedCampsAll.filter(c=>c.campName.toLowerCase().includes(campQ)):sortedCampsAll;
+  const sortedCamps=campQ?sortedCampsAll.filter(c=>c.campName.toLowerCase().includes(campQ)||c.dispName.toLowerCase().includes(campQ)):sortedCampsAll;
 
   // Ad rows
   const hasCampSel=S.selectedCamps.size>0;
@@ -1655,7 +1661,7 @@ function renderAnuncios(){
             const sel=S.selectedCamps.has(c.campName);
             return `<tr onclick="toggleCamp('${c.campName.replace(/\\/g,"\\\\").replace(/'/g,"\\'")}' )" style="cursor:pointer;border-top:1px solid var(--border);background:${sel?"rgba(16,185,129,.1)":"transparent"}" onmouseover="if(!this.dataset.sel||this.dataset.sel==='0')this.style.background='rgba(255,255,255,.03)'" onmouseout="if(!this.dataset.sel||this.dataset.sel==='0')this.style.background='transparent'" data-sel="${sel?'1':'0'}">
               <td style="padding:8px;text-align:center;border-top:1px solid var(--border)">${chkBox(sel)}</td>
-              <td style="padding:9px 14px;color:${sel?"#10b981":"var(--text)"};font-size:11px;font-weight:${sel?600:400};max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span title="${c.campName}">${c.campName}</span></td>
+              <td style="padding:9px 14px;color:${sel?"#10b981":"var(--text)"};font-size:11px;font-weight:${sel?600:400};max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span title="${c.dispName}">${c.dispName}</span></td>
               <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:var(--text-strong)">${fBRL(c.spend)}</td>
               <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace">${c.leads}</td>
               <td style="padding:9px 14px;text-align:right;color:${c.cpl>0?sc(c.cpl,META_CPL,false):"var(--muted)"}">${c.cpl>0?fBRL(c.cpl):"—"}</td>

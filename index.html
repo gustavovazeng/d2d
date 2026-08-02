@@ -235,6 +235,16 @@ const CHART_GAP   = "#f87171";
 // (vazio ou variável do Meta não resolvida, ex.: {{campaign.name}}, {{ad.name}})
 const SEM_UTM="Tráfego sem UTM";
 
+// Apelidos de campanha: quando uma campanha é renomeada no Meta Ads Manager mas o
+// link do anúncio continua usando o UTM_CAMPAIGN antigo, os leads chegam com o nome
+// antigo enquanto o investimento acumula sob o nome novo — sem esse mapa, os dois
+// nunca se cruzam e os leads ficam "órfãos" (sem investimento atribuído).
+// Chave = Campaign Name atual no Meta · Valor = nome canônico usado no UTM_CAMPAIGN dos leads.
+const CAMP_ALIAS={
+  "sessao_estrategica-lead-frio-leadqualificado-interesses_saude-01ago":"sessao_estrategica-lead-frio-leadqualificado",
+};
+function resolveCampAlias(name){ return CAMP_ALIAS[name]||name; }
+
 // ── State ─────────────────────────────────────────────────────────────────
 const S = {
   meta:{},
@@ -464,7 +474,7 @@ async function loadData(force=false){
       const adName=r["Ad Name"]||"";
       const adId=(r["Ad ID"]||r["Ad Id"]||"").trim();
       const igUrl=r["Instagram Permalink URL"]||"";
-      const campName=r["Campaign Name"]||"—";
+      const campName=resolveCampAlias(r["Campaign Name"]||"—");
       const advCode=extractAdvCode(adName)||(adName?adName.toLowerCase():null);
       const temp=extractTemp(campName);
       // Mapas Ad ID → Campaign Name e Ad ID → advCode para cruzar com leads

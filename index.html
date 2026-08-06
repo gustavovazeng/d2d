@@ -218,10 +218,13 @@ const METAS_T = {
   txConvPg: {val:10,    higher:true},
 };
 
-// ── Planejamento (meta de investimento do mês) ──────────────────────────────
+// ── Planejamento (meta de MQL do mês → investimento/leads como reflexo) ────
 const PLAN_START = "2026-08-01";
 const PLAN_END   = "2026-08-31";
-const PLAN_TOTAL = 250000;
+const PLAN_MQL_META   = 900;          // meta de MQL do mês inteiro (já contando o realizado)
+const PLAN_FIX_UNTIL   = "2026-08-05"; // até essa data (inclusive): planejado = realizado
+const PLAN_SCALE_CUT   = "2026-08-20"; // até essa data (inclusive): escala alta; depois, reduzida
+const PLAN_SCALE_DOWN  = 0.30;         // redução da escala baixa em relação à alta (30%)
 
 // Chart colors
 const CHART_COLOR = "#3b82f6";
@@ -756,24 +759,62 @@ function addDaysISO(iso,n){
   dt.setUTCDate(dt.getUTCDate()+n);
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth()+1).padStart(2,"0")}-${String(dt.getUTCDate()).padStart(2,"0")}`;
 }
+// Distribui um total inteiro em n dias com arredondamento cumulativo (soma exata, sem deriva).
+function distributeInt(total,n){
+  const arr=[];let prevCum=0;
+  for(let i=1;i<=n;i++){
+    const cum=Math.round(total*i/n);
+    arr.push(cum-prevCum);
+    prevCum=cum;
+  }
+  return arr;
+}
 function buildPlanDays(){
   const dates=[];
   for(let d=PLAN_START;d<=PLAN_END;d=addDaysISO(d,1))dates.push(d);
-  const n=dates.length;
   const today=todayISO();
-  let prevCum=0;
-  return dates.map((date,i)=>{
-    const cum=Math.round(PLAN_TOTAL*(i+1)/n*100)/100;
-    const investPlanned=Math.round((cum-prevCum)*100)/100;
-    prevCum=cum;
-    const leadsPlanned=Math.round(investPlanned/META_CPL);
-    const mqlPlanned=Math.round(investPlanned/META_CPMQL);
+
+  // Dias já fechados (<= PLAN_FIX_UNTIL): planejado passa a copiar o realizado — não faz
+  // sentido manter uma meta antiga pra um dia que já aconteceu. O MQL desses dias entra
+  // na conta da meta mensal (900), e o que sobra é replanejado pros dias seguintes.
+  let mqlRealizadoAteFix=0;
+  for(const d of dates){ if(d<=PLAN_FIX_UNTIL) mqlRealizadoAteFix+=(S.mqlD[d]||0); }
+  const mqlRestante=Math.max(0,PLAN_MQL_META-mqlRealizadoAteFix);
+
+  // Dias a replanejar: alta escala até PLAN_SCALE_CUT, escala reduzida (30% a menos) depois.
+  const forecastDates=dates.filter(d=>d>PLAN_FIX_UNTIL);
+  const highDates=forecastDates.filter(d=>d<=PLAN_SCALE_CUT);
+  const lowDates=forecastDates.filter(d=>d>PLAN_SCALE_CUT);
+  const nHigh=highDates.length,nLow=lowDates.length;
+  // Resolve a taxa diária alta X tal que nHigh*X + nLow*(1-PLAN_SCALE_DOWN)*X = mqlRestante
+  const denom=nHigh+nLow*(1-PLAN_SCALE_DOWN);
+  const X=denom>0?mqlRestante/denom:0;
+  const highTotal=Math.round(nHigh*X);
+  const lowTotal=Math.round(nLow*X*(1-PLAN_SCALE_DOWN));
+  const highDaily=distributeInt(highTotal,nHigh);
+  const lowDaily=distributeInt(lowTotal,nLow);
+  const mqlPlanByDate={};
+  highDates.forEach((d,i)=>mqlPlanByDate[d]=highDaily[i]);
+  lowDates.forEach((d,i)=>mqlPlanByDate[d]=lowDaily[i]);
+
+  return dates.map(date=>{
     const hasData=date<=today;
     const m=S.meta[date];
     const l=S.leadsD[date];
     const investRealized=hasData?(m?.spend||0):null;
     const leadsRealized=hasData?(l?.traffic||0):null;
     const mqlRealized=hasData?(S.mqlD[date]||0):null;
+
+    let mqlPlanned,investPlanned,leadsPlanned;
+    if(date<=PLAN_FIX_UNTIL){
+      mqlPlanned=mqlRealized||0;
+      investPlanned=investRealized||0;
+      leadsPlanned=leadsRealized||0;
+    }else{
+      mqlPlanned=mqlPlanByDate[date]||0;
+      investPlanned=mqlPlanned*META_CPMQL;
+      leadsPlanned=Math.round(investPlanned/META_CPL);
+    }
     return{date,investPlanned,leadsPlanned,mqlPlanned,investRealized,leadsRealized,mqlRealized,hasData,isToday:date===today};
   });
 }
@@ -1057,7 +1098,22 @@ function drawDualPrincipal(id,data,rKey,rColor,metaVal,cssW,cssH){
   drawLineArea(ctx,xP,yPL,lVals,CHART_INV,true);
   drawLineArea(ctx,xP,yPR,rVals,rColor,false);
   const step=data.length>60?7:data.length>30?3:data.length>14?2:1;
-  ctx.fillStyle=TICK_C;ctx.font="10px 'DM Mono',monospace";ctx.textAlign="center";ctx.setLineDash([]);
+  // Valor do custo (CPL/CPMQL) direto no ponto da linha — dá pra ler sem precisar
+  // passar o mouse. Só nos pontos "espaçados" (mesmo passo do eixo X) pra não poluir
+  // quando o período tem muitos dias.
+  ctx.font="9px 'DM Mono',monospace";ctx.textAlign="center";ctx.setLineDash([]);
+  data.forEach((d,i)=>{
+    if(i%step!==0)return;
+    const v=rVals[i];if(!v)return;
+    const y=yPR(v);
+    ctx.fillStyle="#121826";
+    const txt="R$"+v.toFixed(0);
+    const tw=ctx.measureText(txt).width;
+    ctx.fillRect(xP(i)-tw/2-3,y-19,tw+6,13);
+    ctx.fillStyle=rColor;
+    ctx.fillText(txt,xP(i),y-9);
+  });
+  ctx.fillStyle=TICK_C;ctx.font="10px 'DM Mono',monospace";ctx.textAlign="center";
   data.forEach((d,i)=>{if(i%step===0)ctx.fillText(d.label,xP(i),P.t+cH+18);});
 }
 

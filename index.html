@@ -458,6 +458,10 @@ async function loadData(force=false){
 
     // ── Process Meta ─────────────────────────────────────────────────────
     const mD={},mByAd={},mByAdByDate={},mByCamp={},mByCampByDate={},metaTemp={};
+    // Investimento por anúncio × campanha × data — necessário pro cross-filtering
+    // (quando uma campanha é selecionada, os anúncios devem mostrar só o investimento
+    // dela, não o total do anúncio somado com outras campanhas que reusam o mesmo criativo).
+    const mByAdCampByDate={};
     const adIdToCampName={}, adIdToAdvCode={}; // Ad ID → Campaign / advCode (para cruzar com leads)
     for(const r of parseSheet(mj)){
       const d=toISO(r["Date"]);if(!d)continue;
@@ -502,6 +506,14 @@ async function loadData(force=false){
         mByAdByDate[advCode][d].impressions+=im;mByAdByDate[advCode][d].metaLeads+=ml;
         if(adId)mByAdByDate[advCode][d].adIds.add(adId);
         if(igUrl&&!mByAdByDate[advCode][d].igUrl)mByAdByDate[advCode][d].igUrl=igUrl;
+        if(campName&&campName!=="—"){
+          if(!mByAdCampByDate[advCode])mByAdCampByDate[advCode]={};
+          if(!mByAdCampByDate[advCode][campName])mByAdCampByDate[advCode][campName]={};
+          if(!mByAdCampByDate[advCode][campName][d])mByAdCampByDate[advCode][campName][d]={spend:0,clicks:0,impressions:0};
+          mByAdCampByDate[advCode][campName][d].spend+=sp;
+          mByAdCampByDate[advCode][campName][d].clicks+=cl;
+          mByAdCampByDate[advCode][campName][d].impressions+=im;
+        }
       }
       if(campName&&campName!=="—"){
         if(!mByCamp[campName])mByCamp[campName]={campName,dispName:campNameRaw,spend:0,clicks:0,impressions:0,metaLeads:0,landingViews:0};
@@ -520,6 +532,7 @@ async function loadData(force=false){
     }
     S.meta=mD;S.metaByAd=mByAd;S.metaByAdByDate=mByAdByDate;
     S.metaByCamp=mByCamp;S.metaByCampByDate=mByCampByDate;S.metaTemp=metaTemp;
+    S.metaByAdCampByDate=mByAdCampByDate;
     S.adIdToCampName=adIdToCampName;S.adIdToAdvCode=adIdToAdvCode;
 
     // ── Process Leads ─────────────────────────────────────────────────────
@@ -527,6 +540,8 @@ async function loadData(force=false){
     // Contadores equivalentes para leads orgânicos (canal "Orgânico" no filtro da aba Funil)
     const mqlDOrganic={},fatCountOrganic={},prazoCountOrganic={},dispCountOrganic={},areaCountOrganic={};
     const leadsTemp={},lByAd={},lByCamp={},mqlByAd={},mqlByCamp={};
+    // Leads/MQL por anúncio × campanha × data — mesmo motivo do mByAdCampByDate acima.
+    const lByAdCampByDate={};
 
     // Extrai Ad ID puro quando o UTM_CONTENT é o próprio Ad ID numérico do Meta
     function extractIdFromUtm(s){ const t=(s||"").trim(); return /^\d{6,}$/.test(t)?t:""; }
@@ -582,6 +597,13 @@ async function loadData(force=false){
           if(!lByAd[advCode])lByAd[advCode]={};
           lByAd[advCode][d]=(lByAd[advCode][d]||0)+1;
           if(mql){if(!mqlByAd[advCode])mqlByAd[advCode]={};mqlByAd[advCode][d]=(mqlByAd[advCode][d]||0)+1;}
+          if(campName){
+            if(!lByAdCampByDate[advCode])lByAdCampByDate[advCode]={};
+            if(!lByAdCampByDate[advCode][campName])lByAdCampByDate[advCode][campName]={};
+            if(!lByAdCampByDate[advCode][campName][d])lByAdCampByDate[advCode][campName][d]={leads:0,mql:0};
+            lByAdCampByDate[advCode][campName][d].leads++;
+            if(mql)lByAdCampByDate[advCode][campName][d].mql++;
+          }
         }
       } else if(isOrganicLead(r)){
         lD[d].organic++;
@@ -607,6 +629,7 @@ async function loadData(force=false){
     S.leadsPrazoOrganic=prazoCountOrganic;S.leadsDispOrganic=dispCountOrganic;S.leadsAreaOrganic=areaCountOrganic;
     S.leadsTemp=leadsTemp;S.leadsByAd=lByAd;S.leadsByCamp=lByCamp;
     S.mqlByAd=mqlByAd;S.mqlByCamp=mqlByCamp;
+    S.leadsByAdCampByDate=lByAdCampByDate;
 
     // ── Process Base Seguidores (aba única — funil ainda não ativado) ────
     // Colunas em português: Dia, Nome da campanha, Nome do anúncio,
@@ -1517,17 +1540,42 @@ function renderAnuncios(){
 
   // Ad rows
   const hasCampSel=S.selectedCamps.size>0;
+  // Cross-filtering: quando uma (ou mais) campanha está selecionada, investimento/leads/MQL
+  // de cada anúncio precisam ficar restritos ao que aconteceu DENTRO daquelas campanhas —
+  // não ao total do anúncio somado com outras campanhas que reusam o mesmo criativo.
+  function sumAdSpendScoped(advCode){
+    if(!hasCampSel){
+      let spend=0,clicks=0,impressions=0,igUrl="";
+      const byDate=S.metaByAdByDate[advCode]||{};
+      for(const[d,vals] of Object.entries(byDate)){if(d>=start&&d<=end){spend+=vals.spend;clicks+=vals.clicks;impressions+=vals.impressions;if(!igUrl&&vals.igUrl)igUrl=vals.igUrl;}}
+      return{spend,clicks,impressions,igUrl};
+    }
+    let spend=0,clicks=0,impressions=0;
+    const byCamp=S.metaByAdCampByDate[advCode]||{};
+    for(const camp of S.selectedCamps){
+      const byDate=byCamp[camp]||{};
+      for(const[d,vals] of Object.entries(byDate)){if(d>=start&&d<=end){spend+=vals.spend;clicks+=vals.clicks;impressions+=vals.impressions;}}
+    }
+    return{spend,clicks,impressions,igUrl:""};
+  }
+  function sumAdLeadsScoped(advCode){
+    if(!hasCampSel)return{leads:sumPeriod(S.leadsByAd,advCode),mql:sumPeriod(S.mqlByAd,advCode)};
+    let leads=0,mql=0;
+    const byCamp=S.leadsByAdCampByDate[advCode]||{};
+    for(const camp of S.selectedCamps){
+      const byDate=byCamp[camp]||{};
+      for(const[d,vals] of Object.entries(byDate)){if(d>=start&&d<=end){leads+=vals.leads;mql+=vals.mql;}}
+    }
+    return{leads,mql};
+  }
   const adRows=[];
   for(const[advCode,meta] of Object.entries(S.metaByAd)){
     if(hasCampSel){const adCamps=meta.camps||new Set();if(![...S.selectedCamps].some(c=>adCamps.has(c)))continue;}
     if(tf!=="todas"){const adCamps=meta.camps||new Set();if(![...adCamps].some(c=>extractTemp(c)===tf))continue;}
-    const byDate=S.metaByAdByDate[advCode]||{};
-    let spend=0,clicks=0,impressions=0,igUrl="";
-    for(const[d,vals] of Object.entries(byDate)){if(d>=start&&d<=end){spend+=vals.spend;clicks+=vals.clicks;impressions+=vals.impressions;if(!igUrl&&vals.igUrl)igUrl=vals.igUrl;}}
+    const{spend,clicks,impressions,igUrl:igUrlScoped}=sumAdSpendScoped(advCode);
     if(spend===0)continue;
-    if(!igUrl)igUrl=meta.igUrl||"";
-    const leads=sumPeriod(S.leadsByAd,advCode);
-    const mql=sumPeriod(S.mqlByAd,advCode);
+    const igUrl=igUrlScoped||meta.igUrl||"";
+    const{leads,mql}=sumAdLeadsScoped(advCode);
     adRows.push({advCode,adName:meta.adName||advCode,spend,clicks,impressions,leads,mql,igUrl,
       cpc:clicks>0?spend/clicks:0, ctr:impressions>0?(clicks/impressions)*100:0,
       cpm:impressions>0?(spend/impressions)*1000:0,

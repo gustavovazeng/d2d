@@ -1596,11 +1596,12 @@ function renderAnuncios(){
 
   // Ad rows
   const hasCampSel=S.selectedCamps.size>0;
-  // Cross-filtering: quando uma (ou mais) campanha está selecionada, investimento/leads/MQL
-  // de cada anúncio precisam ficar restritos ao que aconteceu DENTRO daquelas campanhas —
-  // não ao total do anúncio somado com outras campanhas que reusam o mesmo criativo.
-  function sumAdSpendScoped(advCode){
-    if(!hasCampSel){
+  // Cross-filtering: quando uma (ou mais) campanha está selecionada, OU quando o filtro de
+  // temperatura está ativo, investimento/leads/MQL de cada anúncio precisam ficar restritos
+  // às campanhas que batem com o filtro — não ao total do anúncio somado com outras
+  // campanhas (de outra temperatura, por exemplo) que reusam o mesmo criativo.
+  function sumAdSpendScoped(advCode,scopeCamps){
+    if(!scopeCamps){
       let spend=0,clicks=0,impressions=0,igUrl="";
       const byDate=S.metaByAdByDate[advCode]||{};
       for(const[d,vals] of Object.entries(byDate)){if(d>=start&&d<=end){spend+=vals.spend;clicks+=vals.clicks;impressions+=vals.impressions;if(!igUrl&&vals.igUrl)igUrl=vals.igUrl;}}
@@ -1608,17 +1609,17 @@ function renderAnuncios(){
     }
     let spend=0,clicks=0,impressions=0;
     const byCamp=S.metaByAdCampByDate[advCode]||{};
-    for(const camp of S.selectedCamps){
+    for(const camp of scopeCamps){
       const byDate=byCamp[camp]||{};
       for(const[d,vals] of Object.entries(byDate)){if(d>=start&&d<=end){spend+=vals.spend;clicks+=vals.clicks;impressions+=vals.impressions;}}
     }
     return{spend,clicks,impressions,igUrl:""};
   }
-  function sumAdLeadsScoped(advCode){
-    if(!hasCampSel)return{leads:sumPeriod(S.leadsByAd,advCode),mql:sumPeriod(S.mqlByAd,advCode)};
+  function sumAdLeadsScoped(advCode,scopeCamps){
+    if(!scopeCamps)return{leads:sumPeriod(S.leadsByAd,advCode),mql:sumPeriod(S.mqlByAd,advCode)};
     let leads=0,mql=0;
     const byCamp=S.leadsByAdCampByDate[advCode]||{};
-    for(const camp of S.selectedCamps){
+    for(const camp of scopeCamps){
       const byDate=byCamp[camp]||{};
       for(const[d,vals] of Object.entries(byDate)){if(d>=start&&d<=end){leads+=vals.leads;mql+=vals.mql;}}
     }
@@ -1626,12 +1627,19 @@ function renderAnuncios(){
   }
   const adRows=[];
   for(const[advCode,meta] of Object.entries(S.metaByAd)){
-    if(hasCampSel){const adCamps=meta.camps||new Set();if(![...S.selectedCamps].some(c=>adCamps.has(c)))continue;}
-    if(tf!=="todas"){const adCamps=meta.camps||new Set();if(![...adCamps].some(c=>extractTemp(c)===tf))continue;}
-    const{spend,clicks,impressions,igUrl:igUrlScoped}=sumAdSpendScoped(advCode);
+    const adCamps=meta.camps||new Set();
+    if(hasCampSel){if(![...S.selectedCamps].some(c=>adCamps.has(c)))continue;}
+    if(tf!=="todas"){if(![...adCamps].some(c=>extractTemp(c)===tf))continue;}
+    // Escopo de campanhas pra somar investimento/leads/MQL deste anúncio:
+    // seleção manual de campanha tem prioridade; senão, filtro de temperatura restringe
+    // às campanhas do próprio anúncio que batem com a temperatura escolhida.
+    let scopeCamps=null;
+    if(hasCampSel)scopeCamps=[...S.selectedCamps];
+    else if(tf!=="todas")scopeCamps=[...adCamps].filter(c=>extractTemp(c)===tf);
+    const{spend,clicks,impressions,igUrl:igUrlScoped}=sumAdSpendScoped(advCode,scopeCamps);
     if(spend===0)continue;
     const igUrl=igUrlScoped||meta.igUrl||"";
-    const{leads,mql}=sumAdLeadsScoped(advCode);
+    const{leads,mql}=sumAdLeadsScoped(advCode,scopeCamps);
     adRows.push({advCode,adName:meta.adName||advCode,spend,clicks,impressions,leads,mql,igUrl,
       cpc:clicks>0?spend/clicks:0, ctr:impressions>0?(clicks/impressions)*100:0,
       cpm:impressions>0?(spend/impressions)*1000:0,

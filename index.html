@@ -222,9 +222,9 @@ const METAS_T = {
 const PLAN_START = "2026-08-01";
 const PLAN_END   = "2026-08-31";
 const PLAN_MQL_META   = 900;          // meta de MQL do mês inteiro (já contando o realizado)
-const PLAN_FIX_UNTIL   = "2026-08-05"; // até essa data (inclusive): planejado = realizado
-const PLAN_SCALE_CUT   = "2026-08-20"; // até essa data (inclusive): escala alta; depois, reduzida
-const PLAN_SCALE_DOWN  = 0.30;         // redução da escala baixa em relação à alta (30%)
+const PLAN_FIX_UNTIL   = "2026-08-07"; // até essa data (inclusive): planejado = realizado
+const PLAN_INVEST_CAP  = 200000;       // teto de investimento do mês — restrição principal;
+                                        // se não der pra bater os 900 MQL dentro desse teto, tudo bem ficar abaixo
 
 // Chart colors
 const CHART_COLOR = "#3b82f6";
@@ -775,27 +775,28 @@ function buildPlanDays(){
   const today=todayISO();
 
   // Dias já fechados (<= PLAN_FIX_UNTIL): planejado passa a copiar o realizado — não faz
-  // sentido manter uma meta antiga pra um dia que já aconteceu. O MQL desses dias entra
-  // na conta da meta mensal (900), e o que sobra é replanejado pros dias seguintes.
-  let mqlRealizadoAteFix=0;
-  for(const d of dates){ if(d<=PLAN_FIX_UNTIL) mqlRealizadoAteFix+=(S.mqlD[d]||0); }
-  const mqlRestante=Math.max(0,PLAN_MQL_META-mqlRealizadoAteFix);
+  // sentido manter uma meta antiga pra um dia que já aconteceu. O MQL e o investimento
+  // desses dias entram na conta do mês, e o que sobra é replanejado pros dias seguintes.
+  let mqlRealizadoAteFix=0,investRealizadoAteFix=0;
+  for(const d of dates){
+    if(d<=PLAN_FIX_UNTIL){
+      mqlRealizadoAteFix+=(S.mqlD[d]||0);
+      investRealizadoAteFix+=(S.meta[d]?.spend||0);
+    }
+  }
+  // Restrição principal agora é o teto de investimento do mês (R$200k) — o MQL desejado
+  // (pra completar a meta de 900) só é usado se couber dentro do orçamento restante;
+  // senão, fica limitado pelo que o orçamento permite (podendo terminar abaixo de 900).
+  const mqlDesejado=Math.max(0,PLAN_MQL_META-mqlRealizadoAteFix);
+  const orcamentoRestante=Math.max(0,PLAN_INVEST_CAP-investRealizadoAteFix);
+  const mqlMaxPeloOrcamento=Math.floor(orcamentoRestante/META_CPMQL);
+  const mqlRestante=Math.min(mqlDesejado,mqlMaxPeloOrcamento);
 
-  // Dias a replanejar: alta escala até PLAN_SCALE_CUT, escala reduzida (30% a menos) depois.
+  // Dias a replanejar: mesma quantidade de MQL por dia, distribuída igualmente até o fim do mês.
   const forecastDates=dates.filter(d=>d>PLAN_FIX_UNTIL);
-  const highDates=forecastDates.filter(d=>d<=PLAN_SCALE_CUT);
-  const lowDates=forecastDates.filter(d=>d>PLAN_SCALE_CUT);
-  const nHigh=highDates.length,nLow=lowDates.length;
-  // Resolve a taxa diária alta X tal que nHigh*X + nLow*(1-PLAN_SCALE_DOWN)*X = mqlRestante
-  const denom=nHigh+nLow*(1-PLAN_SCALE_DOWN);
-  const X=denom>0?mqlRestante/denom:0;
-  const highTotal=Math.round(nHigh*X);
-  const lowTotal=Math.round(nLow*X*(1-PLAN_SCALE_DOWN));
-  const highDaily=distributeInt(highTotal,nHigh);
-  const lowDaily=distributeInt(lowTotal,nLow);
+  const forecastDaily=distributeInt(mqlRestante,forecastDates.length);
   const mqlPlanByDate={};
-  highDates.forEach((d,i)=>mqlPlanByDate[d]=highDaily[i]);
-  lowDates.forEach((d,i)=>mqlPlanByDate[d]=lowDaily[i]);
+  forecastDates.forEach((d,i)=>mqlPlanByDate[d]=forecastDaily[i]);
 
   return dates.map(date=>{
     const hasData=date<=today;

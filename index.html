@@ -245,6 +245,7 @@ const SEM_UTM="Tráfego sem UTM";
 // Chave = Campaign Name atual no Meta · Valor = nome canônico usado no UTM_CAMPAIGN dos leads.
 const CAMP_ALIAS={
   "sessao_estrategica-lead-frio-leadqualificado-interesses_saude-01ago":"sessao_estrategica-lead-frio-leadqualificado",
+  "SessaoEstrategica_Captacao_ConvLeadQualificado_Stories_DiretoForms_HierarquiaAmpla_MelhoresMQLs02":"SessaoEstrategica_Captacao_ConvLeadQualificado_Stories_DiretoForms_HierarquiaAmpla_CriativosTier02_MelhoresMQLs02 — Cópia",
 };
 function resolveCampAlias(name){ return CAMP_ALIAS[name]||name; }
 
@@ -575,7 +576,9 @@ async function loadData(force=false){
         // Valores vazios ou variáveis do Meta não resolvidas (ex.: {{campaign.name}}, {{ad.name}})
         // são agrupados como "Tráfego sem UTM" em vez de ficarem invisíveis nas tabelas.
         const campRaw=(r["UTM_CAMPAIGN"]||"").trim();
-        const campName=(!campRaw||campRaw.startsWith("{{"))?SEM_UTM:campRaw;
+        // resolveCampAlias também roda aqui: às vezes é o UTM_CAMPAIGN do lead que ficou
+        // com o nome antigo/curto (não o Meta) — o mesmo mapa cobre os dois sentidos.
+        const campName=(!campRaw||campRaw.startsWith("{{"))?SEM_UTM:resolveCampAlias(campRaw);
         const rawAdRaw=(r["UTM_CONTENT"]||"").trim();
         const rawAd=(!rawAdRaw||rawAdRaw.startsWith("{{"))?"":rawAdRaw;
         const adIdFromContent=extractIdFromUtm(rawAd);

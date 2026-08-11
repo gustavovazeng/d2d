@@ -237,6 +237,11 @@ const PLAN_FIX_UNTIL   = "2026-08-07"; // até essa data (inclusive): planejado 
 const PLAN_INVEST_CAP  = 200000;       // teto de investimento do mês — restrição principal;
                                         // se não der pra bater os 900 MQL dentro desse teto, tudo bem ficar abaixo
 
+// ── Planejamento — Seguidores (investimento fixo por dia → seguidores como reflexo) ──
+const PLAN_START_SEG = "2026-08-12";
+const PLAN_END_SEG   = "2026-08-31";
+const PLAN_DAILY_SEG  = 350; // investimento fixo planejado por dia (R$)
+
 // Chart colors
 const CHART_COLOR = "#3b82f6";
 const CHART_INV   = "#3b82f6";
@@ -1030,6 +1035,7 @@ function renderHeader(){
     {id:"trafego",label:"⟳ Métricas tráfego"},
     {id:"anuncios",label:"◈ Campanhas / Anúncios"},
     {id:"resumo",label:"📋 Resumo diário"},
+    {id:"planejamento",label:"🗓️ Planejamento"},
   ];
   const TABS=S.activeDash==="seguidores"?TABS_SEG:TABS_LS;
   tabsEl.innerHTML=TABS.map(t=>`<button class="htab${p===t.id?" htab-active":""}" onclick="navTo('${t.id}')">${t.label}</button>`).join("");
@@ -2699,6 +2705,87 @@ function renderResumoSeg(){
   });
 }
 
+// ── Planejamento (Seguidores — investimento fixo/dia) ───────────────────────
+function buildPlanDaysSeg(){
+  const dates=[];
+  for(let d=PLAN_START_SEG;d<=PLAN_END_SEG;d=addDaysISO(d,1))dates.push(d);
+  const today=todayISO();
+  return dates.map(date=>{
+    const hasData=date<=today;
+    const m=S.distMeta[date];
+    const sg=S.distSeg[date];
+    const investRealized=hasData?(m?.spend||0):null;
+    const seguidoresRealized=hasData?(sg?.seguidores||0):null;
+    const investPlanned=PLAN_DAILY_SEG;
+    const seguidoresPlanned=Math.round(investPlanned/META_CUSTO_SEGUIDOR);
+    return{date,investPlanned,seguidoresPlanned,investRealized,seguidoresRealized,hasData,isToday:date===today};
+  });
+}
+
+// ── Render Planejamento (Seguidores) ─────────────────────────────────────────
+function renderPlanejamentoSeg(){
+  const el=document.getElementById("page-planejamento");if(!el)return;
+  const days=buildPlanDaysSeg();
+  const done=days.filter(d=>d.hasData);
+  const investPlanTotal=days.reduce((a,d)=>a+d.investPlanned,0);
+  const segPlanTotal=days.reduce((a,d)=>a+d.seguidoresPlanned,0);
+  const investRealTotal=done.reduce((a,d)=>a+d.investRealized,0);
+  const segRealTotal=done.reduce((a,d)=>a+d.seguidoresRealized,0);
+  const investPlanAteHoje=done.reduce((a,d)=>a+d.investPlanned,0);
+  const segPlanAteHoje=done.reduce((a,d)=>a+d.seguidoresPlanned,0);
+  const sc=(val,meta)=>meta>0?statusColor(val,meta,true):"var(--text-strong)";
+
+  el.innerHTML=`
+    <div class="hdr" style="margin-bottom:6px">
+      <div>
+        <div class="hdr-title">Planejamento — ${_distLabel()}</div>
+        <div class="hdr-sub">${days.length} dias · R$ ${PLAN_DAILY_SEG.toLocaleString("pt-BR")}/dia · período: ${fDateBR(PLAN_START_SEG)} a ${fDateBR(PLAN_END_SEG)} · atualizado em: ${S.updated||"—"}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px">${statusLegend()}</div>
+    </div>
+    ${S.error?`<div class="err">⚠️ ${S.error}</div>`:""}
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:13px;margin-bottom:13px">
+      ${kpiCard("Investimento planejado",fBRL(investPlanTotal),"total do período","var(--text-strong)")}
+      ${kpiCard("Investimento realizado",fBRL(investRealTotal),"","var(--text-strong)",false,done.length>0?investRealTotal:null,done.length>0?investPlanAteHoje:null,true)}
+      ${kpiCard("Investimento planejado até hoje",fBRL(investPlanAteHoje),"","var(--text-strong)")}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:13px;margin-bottom:20px">
+      ${kpiCard("Seguidores planejados",segPlanTotal.toLocaleString("pt-BR"),"total do período","#10b981")}
+      ${kpiCard("Seguidores realizados",segRealTotal.toLocaleString("pt-BR"),"","#10b981",false,done.length>0?segRealTotal:null,done.length>0?segPlanAteHoje:null,true)}
+      ${kpiCard("Seguidores planejados até hoje",segPlanAteHoje.toLocaleString("pt-BR"),"","#10b981")}
+    </div>
+
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:var(--card)">
+          <th style="padding:9px 14px;text-align:left;color:var(--hint);font-size:10px;text-transform:uppercase;letter-spacing:.04em">Data</th>
+          <th style="padding:9px 14px;text-align:right;color:var(--hint);font-size:10px;text-transform:uppercase;letter-spacing:.04em">Investimento planejado</th>
+          <th style="padding:9px 14px;text-align:right;color:var(--hint);font-size:10px;text-transform:uppercase;letter-spacing:.04em">Investimento realizado</th>
+          <th style="padding:9px 14px;text-align:right;color:var(--hint);font-size:10px;text-transform:uppercase;letter-spacing:.04em">Seguidores planejados</th>
+          <th style="padding:9px 14px;text-align:right;color:var(--hint);font-size:10px;text-transform:uppercase;letter-spacing:.04em">Seguidores realizados</th>
+        </tr></thead>
+        <tbody>
+          ${days.map(d=>`
+            <tr style="border-top:1px solid var(--border);${d.isToday?"background:rgba(59,130,246,.08)":""}">
+              <td style="padding:8px 14px;color:var(--text-strong);font-family:'JetBrains Mono',monospace">${fDate(d.date)}${d.isToday?" 👈":""}</td>
+              <td style="padding:8px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:var(--text)">${fBRL(d.investPlanned)}</td>
+              <td style="padding:8px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:${d.hasData?sc(d.investRealized,d.investPlanned):"var(--hint)"}">${d.hasData?fBRL(d.investRealized):"—"}</td>
+              <td style="padding:8px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:var(--text)">${d.seguidoresPlanned}</td>
+              <td style="padding:8px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:${d.hasData?sc(d.seguidoresRealized,d.seguidoresPlanned):"var(--hint)"}">${d.hasData?d.seguidoresRealized:"—"}</td>
+            </tr>`).join("")}
+          <tr style="border-top:2px solid var(--border);font-weight:700">
+            <td style="padding:9px 14px;color:var(--text-strong)">Total</td>
+            <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:var(--text-strong)">${fBRL(investPlanTotal)}</td>
+            <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:${done.length>0?sc(investRealTotal,investPlanAteHoje):"var(--text-strong)"}">${fBRL(investRealTotal)}</td>
+            <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:var(--text-strong)">${segPlanTotal}</td>
+            <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:${done.length>0?sc(segRealTotal,segPlanAteHoje):"var(--text-strong)"}">${segRealTotal}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>`;
+}
+
 // ── Render Planejamento ─────────────────────────────────────────────────────
 function renderPlanejamento(){
   const el=document.getElementById("page-planejamento");if(!el)return;
@@ -2801,6 +2888,7 @@ function render(){
     else if(S.currentPage==="trafego") renderTrafegoSeg();
     else if(S.currentPage==="anuncios")renderAnunciosSeg();
     else if(S.currentPage==="resumo")  renderResumoSeg();
+    else if(S.currentPage==="planejamento") renderPlanejamentoSeg();
   } else {
     if(S.currentPage==="principal")    renderPrincipal();
     else if(S.currentPage==="funil")   renderFunil();

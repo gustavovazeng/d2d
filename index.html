@@ -2596,11 +2596,23 @@ function renderResumoSeg(){
   function fDM(iso){if(!iso)return"—";const[,m,d]=iso.split("-");return `${d}/${m}`;}
   const dateLabel=start===end?fDM(start):`${fDM(start)} a ${fDM(end)}`;
   function fBRLR(n){return "R$ "+(n||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});}
-  function row(lbl,val){return `<div style="display:grid;grid-template-columns:200px 1fr;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04);align-items:center">
+  function em(val,meta,higher){
+    if(!val||val===0)return "";
+    const ratio=higher?val/meta:meta/val;
+    if(ratio>=1)return "🟢";if(ratio>=0.85)return "🟡";return "🔴";
+  }
+  function row(lbl,val,metaStr,emoji){
+    return `<div style="display:grid;grid-template-columns:200px 1fr auto;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04);align-items:center">
     <span style="color:var(--muted);font-size:12px">${lbl}</span>
     <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-strong)">${val||"—"}</span>
+    <span style="font-size:13px;min-width:28px;text-align:right">${emoji||""}<span style="font-size:10px;color:var(--hint);margin-left:4px">${metaStr||""}</span></span>
   </div>`;}
   function sectionSeg(label,m,isHoje=false){
+    const cvE=em(m.custoPorVisita,META_CUSTO_VISITA,false);
+    const csE=em(m.custoPorSeguidor,META_CUSTO_SEGUIDOR,false);
+    const cpcE=em(m.cpc,METAS_SEG.cpc.val,false);
+    const ctrE=em(m.ctr,METAS_SEG.ctr.val,true);
+    const cpmE=em(m.cpm,METAS_SEG.cpm.val,false);
     const isManual=isHoje&&S.manualSpendHoje!==null;
     const investRow=isHoje?`
       <div style="display:grid;grid-template-columns:200px 1fr auto;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04);align-items:center">
@@ -2626,19 +2638,34 @@ function renderResumoSeg(){
       <div style="font-size:13px;font-weight:700;color:var(--text-strong);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border)">${label}</div>
       ${investRow}
       ${row("Visitas ao Perfil",m.profileVisits.toLocaleString("pt-BR"))}
-      ${row("Custo/Visita",m.custoPorVisita>0?fBRLR(m.custoPorVisita):"—")}
+      ${row("Custo/Visita",m.custoPorVisita>0?fBRLR(m.custoPorVisita):"—",`meta R$ ${META_CUSTO_VISITA.toLocaleString("pt-BR",{minimumFractionDigits:2})}`,cvE)}
       ${row("Seguidores",m.seguidores.toLocaleString("pt-BR"))}
-      ${row("Custo/Seguidor",m.custoPorSeguidor>0?fBRLR(m.custoPorSeguidor):"—")}
+      ${row("Custo/Seguidor",m.custoPorSeguidor>0?fBRLR(m.custoPorSeguidor):"—",`meta R$ ${META_CUSTO_SEGUIDOR.toLocaleString("pt-BR",{minimumFractionDigits:2})}`,csE)}
       <div style="height:10px"></div>
-      ${row("CPC",m.cpc>0?fBRLR(m.cpc):"—")}
-      ${row("CTR",fPct(m.ctr))}
-      ${row("CPM",m.cpm>0?fBRLR(m.cpm):"—")}
+      ${row("CPC",m.cpc>0?fBRLR(m.cpc):"—",`meta R$ ${METAS_SEG.cpc.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}`,cpcE)}
+      ${row("CTR",fPct(m.ctr),`meta ${METAS_SEG.ctr.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}%`,ctrE)}
+      ${row("CPM",m.cpm>0?fBRLR(m.cpm):"—",`meta R$ ${METAS_SEG.cpm.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}`,cpmE)}
       ${planRow}
     </div>`;
   }
   const planVal=S.manualPlanDist;
   function blockText(label,m){
-    return [`*${label}*`,"",`Investimento:\t${fBRLR(m.spend)}`,`Visitas ao Perfil:\t${m.profileVisits}`,`Custo/Visita:\t${m.custoPorVisita>0?fBRLR(m.custoPorVisita):"—"}`,`Seguidores:\t${m.seguidores}`,`Custo/Seguidor:\t${m.custoPorSeguidor>0?fBRLR(m.custoPorSeguidor):"—"}`,"",`CPC:\t${m.cpc>0?fBRLR(m.cpc):"—"}`,`CTR:\t${fPct(m.ctr)}`,`CPM:\t${m.cpm>0?fBRLR(m.cpm):"—"}`].join("\n");
+    const cvE=em(m.custoPorVisita,META_CUSTO_VISITA,false);
+    const csE=em(m.custoPorSeguidor,META_CUSTO_SEGUIDOR,false);
+    const cpcE=em(m.cpc,METAS_SEG.cpc.val,false);
+    const ctrE=em(m.ctr,METAS_SEG.ctr.val,true);
+    const cpmE=em(m.cpm,METAS_SEG.cpm.val,false);
+    return [`*${label}*`,"",
+      `Investimento:\t${fBRLR(m.spend)}`,
+      `Visitas ao Perfil:\t${m.profileVisits}`,
+      `Custo/Visita:\t${m.custoPorVisita>0?fBRLR(m.custoPorVisita):"—"}\t${cvE} Meta: R$ ${META_CUSTO_VISITA.toLocaleString("pt-BR",{minimumFractionDigits:2})}`,
+      `Seguidores:\t${m.seguidores}`,
+      `Custo/Seguidor:\t${m.custoPorSeguidor>0?fBRLR(m.custoPorSeguidor):"—"}\t${csE} Meta: R$ ${META_CUSTO_SEGUIDOR.toLocaleString("pt-BR",{minimumFractionDigits:2})}`,
+      "",
+      `CPC:\t${m.cpc>0?fBRLR(m.cpc):"—"}\t${cpcE} Meta: R$ ${METAS_SEG.cpc.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}`,
+      `CTR:\t${fPct(m.ctr)}\t${ctrE} Meta: ${METAS_SEG.ctr.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}%`,
+      `CPM:\t${m.cpm>0?fBRLR(m.cpm):"—"}\t${cpmE} Meta: R$ ${METAS_SEG.cpm.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}`,
+    ].join("\n");
   }
   const resumoText=`*Resumo D2D - ${_distLabel()}*\t\t\n\n_${dateLabel}_\t\t\n\n📶 ${blockText("Total",tot)}\n\n⬅️ ${blockText("Ontem",ontem)}\n\n⬇️ ${blockText("Hoje",hoje)}${planVal!==null?`\n\nPlan até hj:\t${fBRLR(planVal)}`:""}`;
   el.innerHTML=`

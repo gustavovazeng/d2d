@@ -156,8 +156,8 @@ input[type=date]::-webkit-calendar-picker-indicator{opacity:.4;cursor:pointer;fi
         <button class="dash-opt active" id="dash-opt-leadscore" onclick="selectDash('leadscore')">
           <span class="dash-opt-dot"></span>D2D - Sessão estratégica
         </button>
-        <button class="dash-opt dash-opt-disabled" id="dash-opt-seguidores" title="Funil ainda não ativado">
-          <span class="dash-opt-dot"></span>D2D - Seguidores<span class="dash-opt-soon">em breve</span>
+        <button class="dash-opt" id="dash-opt-seguidores" onclick="selectDash('seguidores')">
+          <span class="dash-opt-dot"></span>D2D - Seguidores
         </button>
       </div>
     </div>
@@ -216,6 +216,17 @@ const METAS_T = {
   cpm:      {val:85,    higher:false},
   connect:  {val:85,    higher:true},
   txConvPg: {val:10,    higher:true},
+};
+
+// ── Metas D2D — Seguidores ───────────────────────────────────────────────
+const META_CUSTO_VISITA   = 0.27;
+const META_CUSTO_SEGUIDOR = 3.93;
+const METAS_SEG = {
+  custoPorVisita:   {val:0.27, higher:false},
+  custoPorSeguidor: {val:3.93, higher:false},
+  cpc:              {val:0.26, higher:false},
+  ctr:              {val:3.35, higher:true},
+  cpm:              {val:8.56, higher:false},
 };
 
 // ── Planejamento (meta de MQL do mês → investimento/leads como reflexo) ────
@@ -447,15 +458,15 @@ async function loadData(force=false){
       fetch(GS_URL("Base leads")).then(r=>{ if(!r.ok)throw new Error("Base leads: "+r.status); return r.text(); }),
     ]);
 
-    // Fetch da aba Seguidores (funil ainda não ativado — pré-configurado para o futuro)
+    // Fetch da aba Base distribuição (funil Seguidores)
     let distSegText="";
     try{
-      const dr=await fetch(GS_URL("Base Seguidores"));
+      const dr=await fetch(GS_URL("Base distribuição"));
       if(!dr.ok)throw new Error("Status "+dr.status);
       distSegText=await dr.text();
     }catch(segErr){
-      S.distError="Não foi possível carregar Base Seguidores: "+segErr.message;
-      console.warn("Base Seguidores:",segErr.message);
+      S.distError="Não foi possível carregar Base distribuição: "+segErr.message;
+      console.warn("Base distribuição:",segErr.message);
     }
     const mj = parseCSVText(metaText);
     const lj = parseCSVText(leadsText);
@@ -637,33 +648,32 @@ async function loadData(force=false){
     S.mqlByAd=mqlByAd;S.mqlByCamp=mqlByCamp;
     S.leadsByAdCampByDate=lByAdCampByDate;
 
-    // ── Process Base Seguidores (aba única — funil ainda não ativado) ────
-    // Colunas em português: Dia, Nome da campanha, Nome do anúncio,
-    // Seguidores no Instagram, Visitas ao perfil do Instagram,
-    // Valor usado (BRL), Cliques no link, Impressões,
-    // Identificação do anúncio, Reproduções do vídeo por no mínimo 3 segundos,
-    // Reproduções de 25% do vídeo
+    // ── Process Base distribuição (funil Seguidores) ────
+    // Colunas em português: Dia, Nome do anúncio, Valor usado (BRL), Cliques no link,
+    // Impressões, Alcance, Identificação do anúncio, Identificação do conjunto de anúncios,
+    // Link, Nome do conjunto de anúncios, Identificação da campanha, Nome da campanha,
+    // Visitas ao perfil do Instagram, Seguidores no Instagram, Início/Encerramento dos relatórios.
+    // Não há colunas de reprodução de vídeo nessa base — Hook Rate/Hold Rate não se aplicam.
     const distSegJ=parseCSVText(distSegText);
     const dMeta={},dMetaByAd={},dMetaByAdByDate={},dMetaByCampByDate={};
     const dSeg={},dSegByCamp={},dSegByAd={};
     for(const r of parseSheet(distSegJ)){
       const d=toISO(r["Dia"]);if(!d)continue;
-      // Spend: "Valor usado (BRL)" usa ponto como decimal — parseFloat direto
-      const sp=parseFloat((r["Valor usado (BRL)"]||"0").replace(",","."))||0;
+      // Spend: "Valor usado (BRL)" é o nome padrão, mas aceita "valor gasto" como variação —
+      // usa ponto ou vírgula como decimal
+      const spRaw=r["Valor usado (BRL)"]??r["valor gasto"]??r["Valor Gasto"]??"0";
+      const sp=parseFloat(String(spRaw).replace(",","."))||0;
       const cl=parseInt(r["Cliques no link"]||0)||0;
       const im=parseInt(r["Impressões"]||0)||0;
       const pv=parseInt(r["Visitas ao perfil do Instagram"]||0)||0;
       const seg=parseInt(r["Seguidores no Instagram"]||0)||0;
-      const v3=parseInt(r["Reproduções do vídeo por no mínimo 3 segundos"]||0)||0;
-      // Hold Rate: usa 25% (não há 15s) — armazenado em video15s p/ compatibilidade
-      const v15=parseInt(r["Reproduções de 25% do vídeo"]||0)||0;
       const adName=(r["Nome do anúncio"]||"").trim();
       const campName=(r["Nome da campanha"]||"").trim()||"—";
 
       // ── distMeta (gastos + tráfego por dia) ──
-      if(!dMeta[d])dMeta[d]={spend:0,clicks:0,impressions:0,profileVisits:0,video3s:0,video15s:0};
+      if(!dMeta[d])dMeta[d]={spend:0,clicks:0,impressions:0,profileVisits:0};
       dMeta[d].spend+=sp;dMeta[d].clicks+=cl;dMeta[d].impressions+=im;
-      dMeta[d].profileVisits+=pv;dMeta[d].video3s+=v3;dMeta[d].video15s+=v15;
+      dMeta[d].profileVisits+=pv;
 
       // ── distSeg (seguidores por dia) ──
       if(!dSeg[d])dSeg[d]={seguidores:0,profileVisits:0};
@@ -2049,16 +2059,13 @@ function getDailyDist(start,end){
   const ds=_distSrc();
   const allDates=new Set([...Object.keys(ds.meta),...Object.keys(ds.seg)]);
   return Array.from(allDates).sort().filter(d=>d>=start&&d<=end).map(date=>{
-    const m=ds.meta[date]||{spend:0,clicks:0,impressions:0,profileVisits:0,video3s:0,video15s:0};
+    const m=ds.meta[date]||{spend:0,clicks:0,impressions:0,profileVisits:0};
     const sg=ds.seg[date]||{seguidores:0,profileVisits:0};
     const pv=m.profileVisits||sg.profileVisits||0;
     const seguidores=sg.seguidores||0;
-    const hookRate=m.impressions>0?(m.video3s/m.impressions)*100:0;
-    const holdRate=m.video3s>0?(m.video15s/m.video3s)*100:0;
     return{date,label:fDate(date),
       spend:m.spend,clicks:m.clicks,impressions:m.impressions,
-      profileVisits:pv,video3s:m.video3s,video15s:m.video15s,seguidores,
-      hookRate,holdRate,
+      profileVisits:pv,seguidores,
       cpc:m.clicks>0?m.spend/m.clicks:0,
       ctr:m.impressions>0?(m.clicks/m.impressions)*100:0,
       cpm:m.impressions>0?(m.spend/m.impressions)*1000:0,
@@ -2072,11 +2079,9 @@ function getTotalsDist(daily){
   const t=daily.reduce((a,d)=>({
     spend:a.spend+d.spend,clicks:a.clicks+d.clicks,
     impressions:a.impressions+d.impressions,profileVisits:a.profileVisits+d.profileVisits,
-    video3s:a.video3s+d.video3s,video15s:a.video15s+d.video15s,seguidores:a.seguidores+d.seguidores,
-  }),{spend:0,clicks:0,impressions:0,profileVisits:0,video3s:0,video15s:0,seguidores:0});
+    seguidores:a.seguidores+d.seguidores,
+  }),{spend:0,clicks:0,impressions:0,profileVisits:0,seguidores:0});
   return{...t,
-    hookRate:t.impressions>0?(t.video3s/t.impressions)*100:0,
-    holdRate:t.video3s>0?(t.video15s/t.video3s)*100:0,
     cpc:t.clicks>0?t.spend/t.clicks:0,
     ctr:t.impressions>0?(t.clicks/t.impressions)*100:0,
     cpm:t.impressions>0?(t.spend/t.impressions)*1000:0,
@@ -2087,14 +2092,12 @@ function getTotalsDist(daily){
 }
 function getDayMetricsDist(iso){
   const ds=_distSrc();
-  const m=ds.meta[iso]||{spend:0,clicks:0,impressions:0,profileVisits:0,video3s:0,video15s:0};
+  const m=ds.meta[iso]||{spend:0,clicks:0,impressions:0,profileVisits:0};
   const sg=ds.seg[iso]||{seguidores:0,profileVisits:0};
   const pv=m.profileVisits||sg.profileVisits||0;
   const seguidores=sg.seguidores||0;
   return{spend:m.spend,clicks:m.clicks,impressions:m.impressions,
-    profileVisits:pv,video3s:m.video3s,video15s:m.video15s,seguidores,
-    hookRate:m.impressions>0?(m.video3s/m.impressions)*100:0,
-    holdRate:m.video3s>0?(m.video15s/m.video3s)*100:0,
+    profileVisits:pv,seguidores,
     cpc:m.clicks>0?m.spend/m.clicks:0,
     ctr:m.impressions>0?(m.clicks/m.impressions)*100:0,
     cpm:m.impressions>0?(m.spend/m.impressions)*1000:0,
@@ -2229,6 +2232,8 @@ function renderPrincipalSeg(){
   }
   const daily=getDailyDist(S.startDate,S.endDate);
   const tot=getTotalsDist(daily);
+  const cvC=tot.custoPorVisita>0?statusColor(tot.custoPorVisita,METAS_SEG.custoPorVisita.val,METAS_SEG.custoPorVisita.higher):"var(--text-strong)";
+  const csC=tot.custoPorSeguidor>0?statusColor(tot.custoPorSeguidor,METAS_SEG.custoPorSeguidor.val,METAS_SEG.custoPorSeguidor.higher):"var(--text-strong)";
   el.innerHTML=`
     <div class="hdr" style="margin-bottom:6px">
       <div>
@@ -2241,9 +2246,9 @@ function renderPrincipalSeg(){
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:13px;margin-bottom:16px">
       ${kpiCard("Investimento",fBRL(tot.spend),"","var(--text-strong)")}
       ${kpiCard("Visitas ao Perfil",tot.profileVisits.toLocaleString("pt-BR"),"","var(--text-strong)")}
-      ${kpiCard("Custo/Visita",tot.custoPorVisita>0?fBRL(tot.custoPorVisita):"—","","var(--text-strong)")}
+      ${kpiCard("Custo/Visita",tot.custoPorVisita>0?fBRL(tot.custoPorVisita):"—",`meta ${fBRL(META_CUSTO_VISITA)}`,cvC,false,tot.custoPorVisita,META_CUSTO_VISITA,false)}
       ${kpiCard("Seguidores",tot.seguidores.toLocaleString("pt-BR"),"","var(--text-strong)")}
-      ${kpiCard("Custo/Seguidor",tot.custoPorSeguidor>0?fBRL(tot.custoPorSeguidor):"—","","var(--text-strong)")}
+      ${kpiCard("Custo/Seguidor",tot.custoPorSeguidor>0?fBRL(tot.custoPorSeguidor):"—",`meta ${fBRL(META_CUSTO_SEGUIDOR)}`,csC,false,tot.custoPorSeguidor,META_CUSTO_SEGUIDOR,false)}
     </div>
     <div class="cc" style="margin-bottom:12px;position:relative">
       <div class="ch">
@@ -2302,22 +2307,22 @@ function renderTrafegoSeg(){
   const daily=getDailyDist(S.startDate,S.endDate);
   const METRICS=[
     {key:"spend",lbl:"Investimento",fmt:fBRL},
-    {key:"custoPorVisita",lbl:"Custo/Visita",fmt:fBRL},
-    {key:"cpc",lbl:"CPC",fmt:fBRL},
-    {key:"ctr",lbl:"CTR",fmt:fPct},
-    {key:"cpm",lbl:"CPM",fmt:fBRL},
-    {key:"hookRate",lbl:"Hook Rate",fmt:fPct},
-    {key:"holdRate",lbl:"Hold Rate",fmt:fPct},
+    {key:"custoPorVisita",lbl:"Custo/Visita",fmt:fBRL,meta:METAS_SEG.custoPorVisita},
+    {key:"cpc",lbl:"CPC",fmt:fBRL,meta:METAS_SEG.cpc},
+    {key:"ctr",lbl:"CTR",fmt:fPct,meta:METAS_SEG.ctr},
+    {key:"cpm",lbl:"CPM",fmt:fBRL,meta:METAS_SEG.cpm},
     {key:"txConvSeg",lbl:"Tx Conv. Seguidor",fmt:fPct},
   ];
-  function metricsRow(d){return METRICS.map(m=>`<div class="kc" style="padding:12px 14px">
+  function metricsRow(d){return METRICS.map(m=>{
+    const rawVal=d[m.key]||0;
+    const color=m.meta?statusColor(rawVal,m.meta.val,m.meta.higher):"var(--text-strong)";
+    return `<div class="kc" style="padding:12px 14px">
     <div class="kc-lbl">${m.lbl}</div>
-    <div class="kc-val" style="color:var(--text-strong);font-size:17px">${m.fmt(d[m.key]||0)}</div>
-  </div>`).join("");}
+    <div class="kc-val" style="color:${color};font-size:17px">${m.fmt(rawVal)}</div>
+  </div>`;}).join("");}
   const CHART_CFGS=[
     {key:"ctr",lbl:"CTR",fmt:fPct},{key:"cpm",lbl:"CPM",fmt:fBRL},
-    {key:"cpc",lbl:"CPC",fmt:fBRL},{key:"hookRate",lbl:"Hook Rate",fmt:fPct},
-    {key:"holdRate",lbl:"Hold Rate",fmt:fPct},
+    {key:"cpc",lbl:"CPC",fmt:fBRL},
   ];
   el.innerHTML=`
     <div class="hdr" style="margin-bottom:6px">
@@ -2328,9 +2333,9 @@ function renderTrafegoSeg(){
     </div>
     ${S.error?`<div class="err">⚠️ ${S.error}</div>`:""}
     <div class="section-lbl">Hoje — ${fDateBR(today)}</div>
-    <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:10px;margin-bottom:16px">${metricsRow(todayM)}</div>
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:16px">${metricsRow(todayM)}</div>
     <div class="section-lbl">Últimos 3 dias — ${fDateBR(p3Start)} a ${fDateBR(p3End)}</div>
-    <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:10px;margin-bottom:20px">${metricsRow(p3Tot)}</div>
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:20px">${metricsRow(p3Tot)}</div>
     <div class="charts-2x3">
       ${CHART_CFGS.map(c=>`<div class="cc" style="position:relative">
         <div class="ch"><span class="ct">${c.lbl}</span></div>
@@ -2490,7 +2495,7 @@ function renderAnunciosSeg(){
             <td style="padding:9px 14px;color:${sel?"#10b981":"var(--text)"};font-size:11px;font-weight:${sel?600:400};max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${c.campName}">${c.campName}</td>
             <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:var(--text-strong)">${fBRL(c.spend)}</td>
             <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace">${c.profileVisits}</td>
-            <td style="padding:9px 14px;text-align:right;color:var(--text-strong)">${c.custoPorVisita>0?fBRL(c.custoPorVisita):"—"}</td>
+            <td style="padding:9px 14px;text-align:right;color:${c.custoPorVisita>0?statusColor(c.custoPorVisita,METAS_SEG.custoPorVisita.val,METAS_SEG.custoPorVisita.higher):"var(--muted)"}">${c.custoPorVisita>0?fBRL(c.custoPorVisita):"—"}</td>
             <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace">${c.seguidores}</td>
             <td style="padding:9px 14px;text-align:right;color:var(--text-strong)">${c.custoPorSeg>0?fBRL(c.custoPorSeg):"—"}</td>
             <td style="padding:9px 14px;text-align:right;color:var(--text-strong)">${fPct(c.ctr)}</td>
@@ -2534,7 +2539,7 @@ function renderAnunciosSeg(){
             <td style="padding:9px 14px;color:${sel?"#10b981":"var(--text)"};font-size:11px;font-weight:${sel?600:400};max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${a.adName}">${a.adName}</td>
             <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace;color:var(--text-strong)">${fBRL(a.spend)}</td>
             <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace">${a.profileVisits}</td>
-            <td style="padding:9px 14px;text-align:right;color:var(--text-strong)">${a.custoPorVisita>0?fBRL(a.custoPorVisita):"—"}</td>
+            <td style="padding:9px 14px;text-align:right;color:${a.custoPorVisita>0?statusColor(a.custoPorVisita,METAS_SEG.custoPorVisita.val,METAS_SEG.custoPorVisita.higher):"var(--muted)"}">${a.custoPorVisita>0?fBRL(a.custoPorVisita):"—"}</td>
             <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace">${a.seguidores}</td>
             <td style="padding:9px 14px;text-align:right;color:var(--text-strong)">${a.custoPorSeg>0?fBRL(a.custoPorSeg):"—"}</td>
             <td style="padding:9px 14px;text-align:right;color:var(--text-strong)">${fPct(a.ctr)}</td>
@@ -2625,14 +2630,15 @@ function renderResumoSeg(){
       ${row("Seguidores",m.seguidores.toLocaleString("pt-BR"))}
       ${row("Custo/Seguidor",m.custoPorSeguidor>0?fBRLR(m.custoPorSeguidor):"—")}
       <div style="height:10px"></div>
-      ${row("Hook Rate",fPct(m.hookRate))}
-      ${row("Hold Rate",fPct(m.holdRate))}
+      ${row("CPC",m.cpc>0?fBRLR(m.cpc):"—")}
+      ${row("CTR",fPct(m.ctr))}
+      ${row("CPM",m.cpm>0?fBRLR(m.cpm):"—")}
       ${planRow}
     </div>`;
   }
   const planVal=S.manualPlanDist;
   function blockText(label,m){
-    return [`*${label}*`,"",`Investimento:\t${fBRLR(m.spend)}`,`Visitas ao Perfil:\t${m.profileVisits}`,`Custo/Visita:\t${m.custoPorVisita>0?fBRLR(m.custoPorVisita):"—"}`,`Seguidores:\t${m.seguidores}`,`Custo/Seguidor:\t${m.custoPorSeguidor>0?fBRLR(m.custoPorSeguidor):"—"}`,"",`Hook Rate:\t${fPct(m.hookRate)}`,`Hold Rate:\t${fPct(m.holdRate)}`].join("\n");
+    return [`*${label}*`,"",`Investimento:\t${fBRLR(m.spend)}`,`Visitas ao Perfil:\t${m.profileVisits}`,`Custo/Visita:\t${m.custoPorVisita>0?fBRLR(m.custoPorVisita):"—"}`,`Seguidores:\t${m.seguidores}`,`Custo/Seguidor:\t${m.custoPorSeguidor>0?fBRLR(m.custoPorSeguidor):"—"}`,"",`CPC:\t${m.cpc>0?fBRLR(m.cpc):"—"}`,`CTR:\t${fPct(m.ctr)}`,`CPM:\t${m.cpm>0?fBRLR(m.cpm):"—"}`].join("\n");
   }
   const resumoText=`*Resumo D2D - ${_distLabel()}*\t\t\n\n_${dateLabel}_\t\t\n\n📶 ${blockText("Total",tot)}\n\n⬅️ ${blockText("Ontem",ontem)}\n\n⬇️ ${blockText("Hoje",hoje)}${planVal!==null?`\n\nPlan até hj:\t${fBRLR(planVal)}`:""}`;
   el.innerHTML=`

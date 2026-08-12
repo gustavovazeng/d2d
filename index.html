@@ -463,15 +463,15 @@ async function loadData(force=false){
       fetch(GS_URL("Base leads")).then(r=>{ if(!r.ok)throw new Error("Base leads: "+r.status); return r.text(); }),
     ]);
 
-    // Fetch da aba Base distribuição (funil Seguidores)
+    // Fetch da aba Base Seguidores (funil Seguidores)
     let distSegText="";
     try{
-      const dr=await fetch(GS_URL("Base distribuição"));
+      const dr=await fetch(GS_URL("Base Seguidores"));
       if(!dr.ok)throw new Error("Status "+dr.status);
       distSegText=await dr.text();
     }catch(segErr){
-      S.distError="Não foi possível carregar Base distribuição: "+segErr.message;
-      console.warn("Base distribuição:",segErr.message);
+      S.distError="Não foi possível carregar Base Seguidores: "+segErr.message;
+      console.warn("Base Seguidores:",segErr.message);
     }
     const mj = parseCSVText(metaText);
     const lj = parseCSVText(leadsText);
@@ -653,32 +653,36 @@ async function loadData(force=false){
     S.mqlByAd=mqlByAd;S.mqlByCamp=mqlByCamp;
     S.leadsByAdCampByDate=lByAdCampByDate;
 
-    // ── Process Base distribuição (funil Seguidores) ────
-    // Colunas em português: Dia, Nome do anúncio, Valor usado (BRL), Cliques no link,
-    // Impressões, Alcance, Identificação do anúncio, Identificação do conjunto de anúncios,
-    // Link, Nome do conjunto de anúncios, Identificação da campanha, Nome da campanha,
-    // Visitas ao perfil do Instagram, Seguidores no Instagram, Início/Encerramento dos relatórios.
-    // Não há colunas de reprodução de vídeo nessa base — Hook Rate/Hold Rate não se aplicam.
+    // ── Process Base Seguidores (funil Seguidores) ────
+    // Colunas reais: Dia, Nome do anúncio, Valor gasto (BRL), Cliques no link, Impressões,
+    // Alcance, Identificação do anúncio, Identificação do conjunto de anúncios,
+    // Nome do conjunto de anúncios, Identificação da campanha, Nome da campanha,
+    // Visitas ao perfil do Instagram, Seguidores no Instagram,
+    // Reproduções do vídeo por no mínimo 3 segundos, Reproduções de 25% do vídeo,
+    // Início/Encerramento dos relatórios.
     const distSegJ=parseCSVText(distSegText);
     const dMeta={},dMetaByAd={},dMetaByAdByDate={},dMetaByCampByDate={};
     const dSeg={},dSegByCamp={},dSegByAd={};
     for(const r of parseSheet(distSegJ)){
       const d=toISO(r["Dia"]);if(!d)continue;
-      // Spend: "Valor usado (BRL)" é o nome padrão, mas aceita "valor gasto" como variação —
+      // Spend: "Valor gasto (BRL)" é o nome real da coluna; aceita variações como fallback —
       // usa ponto ou vírgula como decimal
-      const spRaw=r["Valor usado (BRL)"]??r["valor gasto"]??r["Valor Gasto"]??"0";
+      const spRaw=r["Valor gasto (BRL)"]??r["Valor usado (BRL)"]??r["valor gasto"]??r["Valor Gasto"]??"0";
       const sp=parseFloat(String(spRaw).replace(",","."))||0;
       const cl=parseInt(r["Cliques no link"]||0)||0;
       const im=parseInt(r["Impressões"]||0)||0;
       const pv=parseInt(r["Visitas ao perfil do Instagram"]||0)||0;
       const seg=parseInt(r["Seguidores no Instagram"]||0)||0;
+      const v3=parseInt(r["Reproduções do vídeo por no mínimo 3 segundos"]||0)||0;
+      // Hold Rate: usa 25% do vídeo (não há marca de 15s) — armazenado em video15s p/ compatibilidade
+      const v25=parseInt(r["Reproduções de 25% do vídeo"]||0)||0;
       const adName=(r["Nome do anúncio"]||"").trim();
       const campName=(r["Nome da campanha"]||"").trim()||"—";
 
       // ── distMeta (gastos + tráfego por dia) ──
-      if(!dMeta[d])dMeta[d]={spend:0,clicks:0,impressions:0,profileVisits:0};
+      if(!dMeta[d])dMeta[d]={spend:0,clicks:0,impressions:0,profileVisits:0,video3s:0,video15s:0};
       dMeta[d].spend+=sp;dMeta[d].clicks+=cl;dMeta[d].impressions+=im;
-      dMeta[d].profileVisits+=pv;
+      dMeta[d].profileVisits+=pv;dMeta[d].video3s+=v3;dMeta[d].video15s+=v25;
 
       // ── distSeg (seguidores por dia) ──
       if(!dSeg[d])dSeg[d]={seguidores:0,profileVisits:0};
@@ -2065,13 +2069,15 @@ function getDailyDist(start,end){
   const ds=_distSrc();
   const allDates=new Set([...Object.keys(ds.meta),...Object.keys(ds.seg)]);
   return Array.from(allDates).sort().filter(d=>d>=start&&d<=end).map(date=>{
-    const m=ds.meta[date]||{spend:0,clicks:0,impressions:0,profileVisits:0};
+    const m=ds.meta[date]||{spend:0,clicks:0,impressions:0,profileVisits:0,video3s:0,video15s:0};
     const sg=ds.seg[date]||{seguidores:0,profileVisits:0};
     const pv=m.profileVisits||sg.profileVisits||0;
     const seguidores=sg.seguidores||0;
     return{date,label:fDate(date),
       spend:m.spend,clicks:m.clicks,impressions:m.impressions,
-      profileVisits:pv,seguidores,
+      profileVisits:pv,video3s:m.video3s,video15s:m.video15s,seguidores,
+      hookRate:m.impressions>0?(m.video3s/m.impressions)*100:0,
+      holdRate:m.video3s>0?(m.video15s/m.video3s)*100:0,
       cpc:m.clicks>0?m.spend/m.clicks:0,
       ctr:m.impressions>0?(m.clicks/m.impressions)*100:0,
       cpm:m.impressions>0?(m.spend/m.impressions)*1000:0,
@@ -2085,9 +2091,11 @@ function getTotalsDist(daily){
   const t=daily.reduce((a,d)=>({
     spend:a.spend+d.spend,clicks:a.clicks+d.clicks,
     impressions:a.impressions+d.impressions,profileVisits:a.profileVisits+d.profileVisits,
-    seguidores:a.seguidores+d.seguidores,
-  }),{spend:0,clicks:0,impressions:0,profileVisits:0,seguidores:0});
+    video3s:a.video3s+d.video3s,video15s:a.video15s+d.video15s,seguidores:a.seguidores+d.seguidores,
+  }),{spend:0,clicks:0,impressions:0,profileVisits:0,video3s:0,video15s:0,seguidores:0});
   return{...t,
+    hookRate:t.impressions>0?(t.video3s/t.impressions)*100:0,
+    holdRate:t.video3s>0?(t.video15s/t.video3s)*100:0,
     cpc:t.clicks>0?t.spend/t.clicks:0,
     ctr:t.impressions>0?(t.clicks/t.impressions)*100:0,
     cpm:t.impressions>0?(t.spend/t.impressions)*1000:0,
@@ -2098,12 +2106,14 @@ function getTotalsDist(daily){
 }
 function getDayMetricsDist(iso){
   const ds=_distSrc();
-  const m=ds.meta[iso]||{spend:0,clicks:0,impressions:0,profileVisits:0};
+  const m=ds.meta[iso]||{spend:0,clicks:0,impressions:0,profileVisits:0,video3s:0,video15s:0};
   const sg=ds.seg[iso]||{seguidores:0,profileVisits:0};
   const pv=m.profileVisits||sg.profileVisits||0;
   const seguidores=sg.seguidores||0;
   return{spend:m.spend,clicks:m.clicks,impressions:m.impressions,
-    profileVisits:pv,seguidores,
+    profileVisits:pv,video3s:m.video3s,video15s:m.video15s,seguidores,
+    hookRate:m.impressions>0?(m.video3s/m.impressions)*100:0,
+    holdRate:m.video3s>0?(m.video15s/m.video3s)*100:0,
     cpc:m.clicks>0?m.spend/m.clicks:0,
     ctr:m.impressions>0?(m.clicks/m.impressions)*100:0,
     cpm:m.impressions>0?(m.spend/m.impressions)*1000:0,
@@ -2317,6 +2327,8 @@ function renderTrafegoSeg(){
     {key:"cpc",lbl:"CPC",fmt:fBRL,meta:METAS_SEG.cpc},
     {key:"ctr",lbl:"CTR",fmt:fPct,meta:METAS_SEG.ctr},
     {key:"cpm",lbl:"CPM",fmt:fBRL,meta:METAS_SEG.cpm},
+    {key:"hookRate",lbl:"Hook Rate",fmt:fPct},
+    {key:"holdRate",lbl:"Hold Rate",fmt:fPct},
     {key:"txConvSeg",lbl:"Tx Conv. Seguidor",fmt:fPct},
   ];
   function metricsRow(d){return METRICS.map(m=>{
@@ -2328,7 +2340,8 @@ function renderTrafegoSeg(){
   </div>`;}).join("");}
   const CHART_CFGS=[
     {key:"ctr",lbl:"CTR",fmt:fPct},{key:"cpm",lbl:"CPM",fmt:fBRL},
-    {key:"cpc",lbl:"CPC",fmt:fBRL},
+    {key:"cpc",lbl:"CPC",fmt:fBRL},{key:"hookRate",lbl:"Hook Rate",fmt:fPct},
+    {key:"holdRate",lbl:"Hold Rate",fmt:fPct},
   ];
   el.innerHTML=`
     <div class="hdr" style="margin-bottom:6px">
@@ -2339,9 +2352,9 @@ function renderTrafegoSeg(){
     </div>
     ${S.error?`<div class="err">⚠️ ${S.error}</div>`:""}
     <div class="section-lbl">Hoje — ${fDateBR(today)}</div>
-    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:16px">${metricsRow(todayM)}</div>
+    <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:10px;margin-bottom:16px">${metricsRow(todayM)}</div>
     <div class="section-lbl">Últimos 3 dias — ${fDateBR(p3Start)} a ${fDateBR(p3End)}</div>
-    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:20px">${metricsRow(p3Tot)}</div>
+    <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:10px;margin-bottom:20px">${metricsRow(p3Tot)}</div>
     <div class="charts-2x3">
       ${CHART_CFGS.map(c=>`<div class="cc" style="position:relative">
         <div class="ch"><span class="ct">${c.lbl}</span></div>
@@ -2651,6 +2664,9 @@ function renderResumoSeg(){
       ${row("CPC",m.cpc>0?fBRLR(m.cpc):"—",`meta R$ ${METAS_SEG.cpc.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}`,cpcE)}
       ${row("CTR",fPct(m.ctr),`meta ${METAS_SEG.ctr.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}%`,ctrE)}
       ${row("CPM",m.cpm>0?fBRLR(m.cpm):"—",`meta R$ ${METAS_SEG.cpm.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}`,cpmE)}
+      <div style="height:10px"></div>
+      ${row("Hook Rate",fPct(m.hookRate))}
+      ${row("Hold Rate",fPct(m.holdRate))}
       ${planRow}
     </div>`;
   }
@@ -2671,6 +2687,9 @@ function renderResumoSeg(){
       `CPC:\t${m.cpc>0?fBRLR(m.cpc):"—"}\t${cpcE} Meta: R$ ${METAS_SEG.cpc.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}`,
       `CTR:\t${fPct(m.ctr)}\t${ctrE} Meta: ${METAS_SEG.ctr.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}%`,
       `CPM:\t${m.cpm>0?fBRLR(m.cpm):"—"}\t${cpmE} Meta: R$ ${METAS_SEG.cpm.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}`,
+      "",
+      `Hook Rate:\t${fPct(m.hookRate)}`,
+      `Hold Rate:\t${fPct(m.holdRate)}`,
     ].join("\n");
   }
   const resumoText=`*Resumo D2D - ${_distLabel()}*\t\t\n\n_${dateLabel}_\t\t\n\n📶 ${blockText("Total",tot)}\n\n⬅️ ${blockText("Ontem",ontem)}\n\n⬇️ ${blockText("Hoje",hoje)}${planVal!==null?`\n\nPlan até hj:\t${fBRLR(planVal)}`:""}`;

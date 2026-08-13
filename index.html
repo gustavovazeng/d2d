@@ -220,13 +220,15 @@ const METAS_T = {
 
 // ── Metas D2D — Seguidores ───────────────────────────────────────────────
 const META_CUSTO_VISITA   = 0.27;
-const META_CUSTO_SEGUIDOR = 3.93;
+const META_CUSTO_SEGUIDOR = 3.00;
 const METAS_SEG = {
-  custoPorVisita:   {val:0.27, higher:false},
-  custoPorSeguidor: {val:3.93, higher:false},
-  cpc:              {val:0.26, higher:false},
-  ctr:              {val:3.35, higher:true},
-  cpm:              {val:8.56, higher:false},
+  custoPorVisita:   {val:0.27,  higher:false},
+  custoPorSeguidor: {val:3.00,  higher:false},
+  cpc:              {val:0.26,  higher:false},
+  ctr:              {val:3.35,  higher:true},
+  cpm:              {val:8.56,  higher:false},
+  hookRate:         {val:24.28, higher:true},
+  holdRate:         {val:26.83, higher:true},
 };
 
 // ── Planejamento (meta de MQL do mês → investimento/leads como reflexo) ────
@@ -2327,8 +2329,8 @@ function renderTrafegoSeg(){
     {key:"cpc",lbl:"CPC",fmt:fBRL,meta:METAS_SEG.cpc},
     {key:"ctr",lbl:"CTR",fmt:fPct,meta:METAS_SEG.ctr},
     {key:"cpm",lbl:"CPM",fmt:fBRL,meta:METAS_SEG.cpm},
-    {key:"hookRate",lbl:"Hook Rate",fmt:fPct},
-    {key:"holdRate",lbl:"Hold Rate",fmt:fPct},
+    {key:"hookRate",lbl:"Hook Rate",fmt:fPct,meta:METAS_SEG.hookRate},
+    {key:"holdRate",lbl:"Hold Rate",fmt:fPct,meta:METAS_SEG.holdRate},
     {key:"txConvSeg",lbl:"Tx Conv. Seguidor",fmt:fPct},
   ];
   function metricsRow(d){return METRICS.map(m=>{
@@ -2632,6 +2634,8 @@ function renderResumoSeg(){
     const cpcE=em(m.cpc,METAS_SEG.cpc.val,false);
     const ctrE=em(m.ctr,METAS_SEG.ctr.val,true);
     const cpmE=em(m.cpm,METAS_SEG.cpm.val,false);
+    const hookE=em(m.hookRate,METAS_SEG.hookRate.val,true);
+    const holdE=em(m.holdRate,METAS_SEG.holdRate.val,true);
     const isManual=isHoje&&S.manualSpendHoje!==null;
     const investRow=isHoje?`
       <div style="display:grid;grid-template-columns:200px 1fr auto;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04);align-items:center">
@@ -2665,8 +2669,8 @@ function renderResumoSeg(){
       ${row("CTR",fPct(m.ctr),`meta ${METAS_SEG.ctr.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}%`,ctrE)}
       ${row("CPM",m.cpm>0?fBRLR(m.cpm):"—",`meta R$ ${METAS_SEG.cpm.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}`,cpmE)}
       <div style="height:10px"></div>
-      ${row("Hook Rate",fPct(m.hookRate))}
-      ${row("Hold Rate",fPct(m.holdRate))}
+      ${row("Hook Rate",fPct(m.hookRate),`meta ${METAS_SEG.hookRate.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}%`,hookE)}
+      ${row("Hold Rate",fPct(m.holdRate),`meta ${METAS_SEG.holdRate.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}%`,holdE)}
       ${planRow}
     </div>`;
   }
@@ -2677,6 +2681,8 @@ function renderResumoSeg(){
     const cpcE=em(m.cpc,METAS_SEG.cpc.val,false);
     const ctrE=em(m.ctr,METAS_SEG.ctr.val,true);
     const cpmE=em(m.cpm,METAS_SEG.cpm.val,false);
+    const hookE=em(m.hookRate,METAS_SEG.hookRate.val,true);
+    const holdE=em(m.holdRate,METAS_SEG.holdRate.val,true);
     return [`*${label}*`,"",
       `Investimento:\t${fBRLR(m.spend)}`,
       `Visitas ao Perfil:\t${m.profileVisits}`,
@@ -2688,8 +2694,8 @@ function renderResumoSeg(){
       `CTR:\t${fPct(m.ctr)}\t${ctrE} Meta: ${METAS_SEG.ctr.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}%`,
       `CPM:\t${m.cpm>0?fBRLR(m.cpm):"—"}\t${cpmE} Meta: R$ ${METAS_SEG.cpm.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}`,
       "",
-      `Hook Rate:\t${fPct(m.hookRate)}`,
-      `Hold Rate:\t${fPct(m.holdRate)}`,
+      `Hook Rate:\t${fPct(m.hookRate)}\t${hookE} Meta: ${METAS_SEG.hookRate.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}%`,
+      `Hold Rate:\t${fPct(m.holdRate)}\t${holdE} Meta: ${METAS_SEG.holdRate.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}%`,
     ].join("\n");
   }
   const resumoText=`*Resumo D2D - ${_distLabel()}*\t\t\n\n_${dateLabel}_\t\t\n\n📶 ${blockText("Total",tot)}\n\n⬅️ ${blockText("Ontem",ontem)}\n\n⬇️ ${blockText("Hoje",hoje)}${planVal!==null?`\n\nPlan até hj:\t${fBRLR(planVal)}`:""}`;

@@ -579,16 +579,16 @@ async function loadData(force=false){
         if(mql)mqlD[d]=(mqlD[d]||0)+1;
 
         const area=canonArea(r["Qual sua área de atuação?"]);
-        if(area)areaCount[area]=(areaCount[area]||0)+1;
+        if(area){if(!areaCount[d])areaCount[d]={};areaCount[d][area]=(areaCount[d][area]||0)+1;}
 
         const fat=(r["Qual é o faturamento médio mensal do seu consultório?"]||"").trim();
-        if(fat)fatCount[fat]=(fatCount[fat]||0)+1;
+        if(fat){if(!fatCount[d])fatCount[d]={};fatCount[d][fat]=(fatCount[d][fat]||0)+1;}
 
         const prazo=(r["Em qual prazo você pretende resolver esse cenário e implementar as mudanças necessárias?"]||"").trim();
-        if(prazo)prazoCount[prazo]=(prazoCount[prazo]||0)+1;
+        if(prazo){if(!prazoCount[d])prazoCount[d]={};prazoCount[d][prazo]=(prazoCount[d][prazo]||0)+1;}
 
         const disp=(r["IMPORTANTE: AVISO"]||"").trim();
-        if(disp)dispCount[disp]=(dispCount[disp]||0)+1;
+        if(disp){if(!dispCount[d])dispCount[d]={};dispCount[d][disp]=(dispCount[d][disp]||0)+1;}
 
         // Attribution — UTMs brutos (não há colunas pré-processadas nessa planilha)
         // Valores vazios ou variáveis do Meta não resolvidas (ex.: {{campaign.name}}, {{ad.name}})
@@ -635,16 +635,16 @@ async function loadData(force=false){
         if(mqlO)mqlDOrganic[d]=(mqlDOrganic[d]||0)+1;
 
         const areaO=canonArea(r["Qual sua área de atuação?"]);
-        if(areaO)areaCountOrganic[areaO]=(areaCountOrganic[areaO]||0)+1;
+        if(areaO){if(!areaCountOrganic[d])areaCountOrganic[d]={};areaCountOrganic[d][areaO]=(areaCountOrganic[d][areaO]||0)+1;}
 
         const fatO=(r["Qual é o faturamento médio mensal do seu consultório?"]||"").trim();
-        if(fatO)fatCountOrganic[fatO]=(fatCountOrganic[fatO]||0)+1;
+        if(fatO){if(!fatCountOrganic[d])fatCountOrganic[d]={};fatCountOrganic[d][fatO]=(fatCountOrganic[d][fatO]||0)+1;}
 
         const prazoO=(r["Em qual prazo você pretende resolver esse cenário e implementar as mudanças necessárias?"]||"").trim();
-        if(prazoO)prazoCountOrganic[prazoO]=(prazoCountOrganic[prazoO]||0)+1;
+        if(prazoO){if(!prazoCountOrganic[d])prazoCountOrganic[d]={};prazoCountOrganic[d][prazoO]=(prazoCountOrganic[d][prazoO]||0)+1;}
 
         const dispO=(r["IMPORTANTE: AVISO"]||"").trim();
-        if(dispO)dispCountOrganic[dispO]=(dispCountOrganic[dispO]||0)+1;
+        if(dispO){if(!dispCountOrganic[d])dispCountOrganic[d]={};dispCountOrganic[d][dispO]=(dispCountOrganic[d][dispO]||0)+1;}
       }
     }
     S.leadsD=lD;S.mqlD=mqlD;S.leadsFat=fatCount;
@@ -1378,6 +1378,15 @@ function mergeCounts(a,b){
   for(const k in b)r[k]=(r[k]||0)+b[k];
   return r;
 }
+// Soma um breakdown indexado por data ({data:{chave:contagem}}) dentro do período informado
+function sumBreakdown(byDate,start,end){
+  const r={};
+  for(const[d,counts] of Object.entries(byDate)){
+    if((start&&d<start)||(end&&d>end))continue;
+    for(const k in counts)r[k]=(r[k]||0)+counts[k];
+  }
+  return r;
+}
 function renderFunil(){
   const el=document.getElementById("page-funil");if(!el)return;
   const ch=S.funilChannel||"pago";
@@ -1400,11 +1409,17 @@ function renderFunil(){
     for(const[d,n] of Object.entries(S.mqlDOrganic)){if(inRange(d))mqlTotal+=n;}
   }
 
-  // Breakdowns (área, faturamento, prazo, disponibilidade) do canal selecionado
-  const dataArea  =ch==="total"?mergeCounts(S.leadsArea,S.leadsAreaOrganic)  :ch==="organico"?S.leadsAreaOrganic  :S.leadsArea;
-  const dataFat   =ch==="total"?mergeCounts(S.leadsFat,S.leadsFatOrganic)    :ch==="organico"?S.leadsFatOrganic   :S.leadsFat;
-  const dataPrazo =ch==="total"?mergeCounts(S.leadsPrazo,S.leadsPrazoOrganic):ch==="organico"?S.leadsPrazoOrganic:S.leadsPrazo;
-  const dataDisp  =ch==="total"?mergeCounts(S.leadsDisp,S.leadsDispOrganic)  :ch==="organico"?S.leadsDispOrganic  :S.leadsDisp;
+  // Breakdowns (área, faturamento, prazo, disponibilidade) do canal selecionado,
+  // agregados só dentro do período selecionado no filtro de datas do topo.
+  const s=S.startDate,e=S.endDate;
+  const areaPago=sumBreakdown(S.leadsArea,s,e),   areaOrg=sumBreakdown(S.leadsAreaOrganic,s,e);
+  const fatPago =sumBreakdown(S.leadsFat,s,e),    fatOrg =sumBreakdown(S.leadsFatOrganic,s,e);
+  const prazoPago=sumBreakdown(S.leadsPrazo,s,e), prazoOrg=sumBreakdown(S.leadsPrazoOrganic,s,e);
+  const dispPago=sumBreakdown(S.leadsDisp,s,e),   dispOrg=sumBreakdown(S.leadsDispOrganic,s,e);
+  const dataArea  =ch==="total"?mergeCounts(areaPago,areaOrg)  :ch==="organico"?areaOrg  :areaPago;
+  const dataFat   =ch==="total"?mergeCounts(fatPago,fatOrg)    :ch==="organico"?fatOrg   :fatPago;
+  const dataPrazo =ch==="total"?mergeCounts(prazoPago,prazoOrg):ch==="organico"?prazoOrg:prazoPago;
+  const dataDisp  =ch==="total"?mergeCounts(dispPago,dispOrg)  :ch==="organico"?dispOrg  :dispPago;
 
   // Faturamento médio mensal — ordem canônica (maior para menor)
   const FAT_ORDER=[
